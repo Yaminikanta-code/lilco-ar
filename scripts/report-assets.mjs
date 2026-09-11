@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 
 const config = JSON.parse(readFileSync('public/demo-experience.json', 'utf8'))
-const referenced = new Set(['/lilco-logo.png', '/demo-experience.mind'])
+const referenced = new Set(['/lilco-logo.png', '/demo-experience.mind', '/target-embeddings.json'])
 
 for (const experience of config) {
   for (const field of ['targetImageUrl', 'glbModelUrl']) {

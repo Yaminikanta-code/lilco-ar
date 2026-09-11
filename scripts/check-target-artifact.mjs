@@ -29,4 +29,16 @@ if (config[0].targetSetVersion !== `mindar-${manifest.compilerVersion}-${ordered
   throw new Error('targetSetVersion does not match the ordered source digest')
 }
 
-console.log(`Target artifact passed: ${manifest.targetCount} ordered targets`)
+// target-embeddings.json is derived from the same source images (a MobileNet
+// embedding of each target's diagram-only region, used to disambiguate which
+// target MindAR is looking at — see src/pages/AR.jsx). Since it's keyed off
+// the same ordered source digest, a source-image or ordering change that
+// isn't followed by `npm run targets:generate-embeddings` fails here too.
+const embeddingsDigest = createHash('sha256')
+  .update(readFileSync('public/target-embeddings.json'))
+  .digest('hex')
+if (embeddingsDigest !== manifest.embeddingsArtifactDigest) {
+  throw new Error('public/target-embeddings.json does not match its validated manifest — run `npm run targets:generate-embeddings`')
+}
+
+console.log(`Target artifact passed: ${manifest.targetCount} ordered targets (+ embeddings artifact)`)

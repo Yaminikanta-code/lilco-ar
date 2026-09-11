@@ -8,5 +8,9 @@
     [1024, 726], [1024, 726], [1024, 726], [1024, 726]
   ],
   "orderedSourceDigest": "169f08e74883e00752fe732d6842a1a63f309879908ca339820fd2625f5b455a",
-  "artifactDigest": "315623996c487181be8fc225c3d1e672c1849eeba0ed79ae0540ddb93c4c2b8d"
+  "artifactDigest": "315623996c487181be8fc225c3d1e672c1849eeba0ed79ae0540ddb93c4c2b8d",
+  "embeddingsMobilenetVersion": 2,
+  "embeddingsMobilenetAlpha": 1.0,
+  "embeddingsCropRect": { "x": 0.49, "y": 0.0, "w": 0.51, "h": 1.0 },
+  "embeddingsArtifactDigest": "cc36a5a3cf6bc20cd262063baccb01de022704b2a031ffbe07d3900ccf2dfa39"
 }
