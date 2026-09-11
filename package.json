@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "tunnel": "cloudflared tunnel --url http://localhost:5173",
     "build": "vite build",
     "build:check": "node scripts/check-target-artifact.mjs && npm run build && node scripts/check-build-budgets.mjs",
     "assets:report": "node scripts/report-assets.mjs",

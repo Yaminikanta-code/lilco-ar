@@ -84,6 +84,16 @@ This application adopts the official **LilCo Signature Orange and Crisp White/Da
    npm run preview
    ```
 
+### Testing on a Real Device (Cloudflare Tunnel)
+
+Camera access for the AR scanner requires HTTPS or `localhost`, so a phone on the same network can't just hit `http://<lan-ip>:5173`. Use a Cloudflare Tunnel to get a temporary public HTTPS URL for the dev server:
+
+1. Start the dev server: `npm run dev`
+2. In a second terminal, start the tunnel: `npm run tunnel`
+3. Open the printed `https://*.trycloudflare.com` URL on your phone.
+
+This requires `cloudflared` installed globally (`cloudflared --version` to check). No Cloudflare account is needed for this quick/ephemeral tunnel.
+
 ---
 
 ## 📱 Mobile APK / Native Build (Capacitor)
