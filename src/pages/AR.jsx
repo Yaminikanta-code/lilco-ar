@@ -559,12 +559,55 @@ function getConfigUrl(id) {
   return DEFAULT_CONFIG_URL
 }
 
+// ---------------------------------------------------------------------------
+// Card classification (server/app.mjs via the classify-card endpoint).
+//
+// All the cards share one template (logo, background, layout) and differ
+// only in a small diagram, which is exactly what defeats MindAR's local-
+// feature tracker when it's asked to distinguish between many targets at
+// once. Rather than fight that, a single photo is classified by a vision LLM
+// first — it reasons over the whole image semantically, no rectification or
+// cropping needed — and MindAR is then only ever given a `.mind` compiled
+// for that ONE identified card, so there's nothing left for it to confuse.
+// ---------------------------------------------------------------------------
+const CAPTURE_MAX_DIMENSION = 640
+const CAPTURE_JPEG_QUALITY = 0.82
+// Bumping this invalidates every cached single-target compile (IndexedDB),
+// independent of any per-experience config field.
+const SINGLE_TARGET_CACHE_VERSION = 'llm-single-target-v1'
+
+function captureFrameAsBase64(video) {
+  const scale = Math.min(1, CAPTURE_MAX_DIMENSION / Math.max(video.videoWidth, video.videoHeight))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(video.videoWidth * scale)
+  canvas.height = Math.round(video.videoHeight * scale)
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', CAPTURE_JPEG_QUALITY).split(',')[1]
+}
+
+async function classifyCard(base64Image) {
+  const response = await fetch('/api/classify-card', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: base64Image }),
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.error || `Classification request failed (${response.status}).`)
+  }
+  return response.json() // { index: number | null, confidence?: string }
+}
+
 export default function AR() {
   const { id } = useParams()
   const containerRef = useRef(null)
   const mindarRef = useRef(null)
   const mediaPlayersRef = useRef([])
   const resizeObserverRef = useRef(null)
+  // Plain camera preview shown before classification — separate from
+  // MindAR's own camera handling, which only starts once a card is chosen.
+  const scanVideoRef = useRef(null)
+  const scanStreamRef = useRef(null)
   // Ref to the active media player for the currently-tracked target, so the
   // React-layer tap overlay can call toggle() without needing closure captures.
   const activeMediaRef = useRef(null)
@@ -579,12 +622,18 @@ export default function AR() {
   // Mirror of `mode` state for use inside the non-React animation loop.
   const modeRef = useRef('2d')
 
+  const [allExperiences, setAllExperiences] = useState(null)
+  const [chosenExperience, setChosenExperience] = useState(null)
   const [config, setConfig] = useState(null)
   const [activeExperience, setActiveExperience] = useState(null)
+  // loading (initial config fetch) -> scanning (viewfinder) -> classifying
+  // (photo sent to the LLM) -> preparing (compiling the single target,
+  // starting MindAR) -> ready -> error
   const [status, setStatus] = useState('loading')
   const [loadingText, setLoadingText] = useState('Loading experience...')
   const [compileProgress, setCompileProgress] = useState(0)
   const [errorMsg, setErrorMsg] = useState('')
+  const [scanHint, setScanHint] = useState('')
   const [tracked, setTracked] = useState(false)
   // Display mode for the active experience: '2d' shows the anchored video,
   // '3d' swaps in the GLB model when the experience configures one.
@@ -600,17 +649,15 @@ export default function AR() {
     applyDisplay(setups, arbiterRef.current.activeIndex, mode)
   }, [mode])
 
-  // Effect 1: load config from backend endpoint and compile target image if needed.
+  // Effect 1: load the experience list (just metadata — no compiling yet).
   useEffect(() => {
     let cancelled = false
 
-    const loadConfig = async () => {
+    const loadExperiences = async () => {
       try {
         performance.mark('ar-config-start')
-        preloadMindARViewer()
         setStatus('loading')
         setLoadingText('Loading experience...')
-        setCompileProgress(0)
 
         const response = await fetch(getConfigUrl(id), { cache: 'no-store' })
         if (!response.ok) {
@@ -621,48 +668,9 @@ export default function AR() {
         experiences.forEach(validateExperience)
         performance.mark('ar-config-ready')
 
-        let mindTargetSource = experiences[0].mindTargetUrl || experiences[0].mindDataUrl
-        if (!mindTargetSource) {
-          const targetImageUrls = experiences.map((exp) => exp.targetImageUrl).filter(Boolean)
-          if (!targetImageUrls.length) {
-            throw new Error('At least one experience must include targetImageUrl or mindDataUrl.')
-          }
-
-          // Build a stable key that is identical across web + Capacitor environments
-          const targetSetVersion = experiences[0].targetSetVersion || ''
-          const cacheKey = buildStableCacheKey(targetImageUrls, targetSetVersion)
-
-          // 1. In-memory cache (fastest — same JS session)
-          if (window.__arCompiledCache && window.__arCompiledCache[cacheKey]) {
-            console.log('[AR Cache] In-memory hit ✓')
-            mindTargetSource = window.__arCompiledCache[cacheKey]
-          } else {
-            // Persist only versioned target sets. An unversioned URL can change
-            // without changing its cache key and must never reuse stale data.
-            const cached = targetSetVersion ? await getCachedTarget(cacheKey) : null
-            if (cached) {
-              console.log('[AR Cache] IndexedDB hit ✓')
-              mindTargetSource = cached
-              if (!window.__arCompiledCache) window.__arCompiledCache = {}
-              window.__arCompiledCache[cacheKey] = cached
-            } else {
-              // 3. Cache miss — compile and store
-              console.log('[AR Cache] Cache miss — compiling targets…')
-              setLoadingText('Preparing AR targets...')
-              mindTargetSource = await compileTargetImages(targetImageUrls, (progress) => {
-                if (!cancelled) setCompileProgress(progress)
-              })
-              if (!window.__arCompiledCache) window.__arCompiledCache = {}
-              window.__arCompiledCache[cacheKey] = mindTargetSource
-              if (targetSetVersion) setCachedTarget(cacheKey, mindTargetSource)
-            }
-          }
-        }
-
         if (!cancelled) {
-          setLoadingText('Initialising camera...')
-          performance.mark('ar-target-data-ready')
-          setConfig({ experiences, mindTargetSource })
+          setAllExperiences(experiences)
+          setStatus('scanning')
         }
       } catch (err) {
         if (!cancelled) {
@@ -672,14 +680,138 @@ export default function AR() {
       }
     }
 
-    loadConfig()
+    loadExperiences()
 
     return () => {
       cancelled = true
     }
   }, [id])
 
-  // Effect 2: start MindAR — only re-runs if config object changes (once)
+  // Effect 2: run the plain camera viewfinder while scanning/classifying.
+  // Separate from MindAR's own camera, which only starts once a card has
+  // been identified (Effect 3 below starts it via `config`).
+  const scanningPhase = status === 'scanning' || status === 'classifying'
+  useEffect(() => {
+    if (!scanningPhase) return
+    let cancelled = false
+
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+      .then((stream) => {
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+        scanStreamRef.current = stream
+        if (scanVideoRef.current) scanVideoRef.current.srcObject = stream
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setStatus('error')
+          setErrorMsg('Camera access is required to scan a card. ' + (err?.message || ''))
+        }
+      })
+
+    return () => {
+      cancelled = true
+      scanStreamRef.current?.getTracks().forEach((track) => track.stop())
+      scanStreamRef.current = null
+    }
+  }, [scanningPhase])
+
+  const handleScanTap = useCallback(async () => {
+    const video = scanVideoRef.current
+    if (!video || !video.videoWidth) return
+    setStatus('classifying')
+    setScanHint('')
+    try {
+      const base64Image = captureFrameAsBase64(video)
+      const result = await classifyCard(base64Image)
+      if (result.index == null || !allExperiences?.[result.index]) {
+        setScanHint("Couldn't recognize that card — try holding it flat, closer, and well-lit.")
+        setStatus('scanning')
+        return
+      }
+      setChosenExperience(allExperiences[result.index])
+    } catch (err) {
+      setStatus('error')
+      setErrorMsg(err?.message || 'Classification failed.')
+    }
+  }, [allExperiences])
+
+  // Retry from an error: if the experience list never loaded, a full reload
+  // is simplest; otherwise just go back to the scanning phase.
+  const handleRetry = useCallback(() => {
+    if (!allExperiences) {
+      window.location.reload()
+      return
+    }
+    setChosenExperience(null)
+    setConfig(null)
+    setErrorMsg('')
+    setStatus('scanning')
+  }, [allExperiences])
+
+  // Effect 3: once a card is identified, compile (or reuse a cached) .mind
+  // for JUST that one target — reusing the same compiler/cache helpers the
+  // app already had for its old multi-target file, just with a single image.
+  useEffect(() => {
+    if (!chosenExperience) return
+    let cancelled = false
+
+    const prepareTarget = async () => {
+      try {
+        preloadMindARViewer()
+        setStatus('preparing')
+        setLoadingText('Preparing AR target...')
+        setCompileProgress(0)
+
+        const targetImageUrls = [chosenExperience.targetImageUrl]
+        const cacheKey = buildStableCacheKey(targetImageUrls, SINGLE_TARGET_CACHE_VERSION)
+
+        let mindTargetSource
+        if (window.__arCompiledCache && window.__arCompiledCache[cacheKey]) {
+          console.log('[AR Cache] In-memory hit ✓')
+          mindTargetSource = window.__arCompiledCache[cacheKey]
+        } else {
+          const cached = await getCachedTarget(cacheKey)
+          if (cached) {
+            console.log('[AR Cache] IndexedDB hit ✓')
+            mindTargetSource = cached
+            if (!window.__arCompiledCache) window.__arCompiledCache = {}
+            window.__arCompiledCache[cacheKey] = cached
+          } else {
+            console.log('[AR Cache] Cache miss — compiling target…')
+            mindTargetSource = await compileTargetImages(targetImageUrls, (progress) => {
+              if (!cancelled) setCompileProgress(progress)
+            })
+            if (!window.__arCompiledCache) window.__arCompiledCache = {}
+            window.__arCompiledCache[cacheKey] = mindTargetSource
+            setCachedTarget(cacheKey, mindTargetSource)
+          }
+        }
+
+        if (!cancelled) {
+          setLoadingText('Initialising camera...')
+          performance.mark('ar-target-data-ready')
+          setConfig({ experiences: [chosenExperience], mindTargetSource })
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setStatus('error')
+          setErrorMsg(err?.message || 'Unable to prepare the AR target.')
+        }
+      }
+    }
+
+    prepareTarget()
+
+    return () => {
+      cancelled = true
+    }
+  }, [chosenExperience])
+
+  // Effect 4: start MindAR — only re-runs if config object changes (once)
   useEffect(() => {
     if (!config || !containerRef.current) return
 
@@ -701,8 +833,15 @@ export default function AR() {
           mindBlobUrl = URL.createObjectURL(base64ToBlob(imageTargetSrc))
           imageTargetSrc = mindBlobUrl
         } else if (imageTargetSrc instanceof ArrayBuffer || ArrayBuffer.isView(imageTargetSrc)) {
-          const targetBytes = imageTargetSrc instanceof ArrayBuffer ? imageTargetSrc : imageTargetSrc.buffer
-          mindBlobUrl = URL.createObjectURL(new Blob([targetBytes], { type: 'application/octet-stream' }))
+          // Pass the value straight through — for a typed-array view (what
+          // compileTargetImages/mind-ar's compiler.exportData() actually
+          // returns, a Uint8Array over an internally pooled, often larger
+          // buffer) the Blob constructor correctly respects its
+          // byteOffset/byteLength. Unwrapping to `.buffer` instead (as this
+          // used to) grabs the whole oversized backing buffer, including
+          // trailing bytes from the encoder's pool, which mind-ar's strict
+          // msgpack decoder then rejects as "Extra byte(s) found".
+          mindBlobUrl = URL.createObjectURL(new Blob([imageTargetSrc], { type: 'application/octet-stream' }))
           imageTargetSrc = mindBlobUrl
         }
 
@@ -1105,6 +1244,27 @@ export default function AR() {
     <div className={styles.page}>
       <div ref={containerRef} className={styles.arContainer} />
 
+      {/* Pre-scan viewfinder — plain camera preview + a manual "Scan" button.
+          Shown before MindAR ever starts; a captured frame is classified by
+          the LLM backend to pick which single card to compile/track. */}
+      {scanningPhase && (
+        <div className={styles.scanContainer}>
+          <video ref={scanVideoRef} className={styles.scanVideo} autoPlay muted playsInline />
+          <div className={styles.scanGuide} />
+          <div className={styles.scanFooter}>
+            {scanHint && <p className={styles.scanHint}>{scanHint}</p>}
+            <button
+              type="button"
+              className={styles.scanButton}
+              disabled={status === 'classifying'}
+              onClick={handleScanTap}
+            >
+              {status === 'classifying' ? 'Identifying card…' : 'Scan card'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Full-screen tap overlay — only active when a target is being tracked
           and a video is actually on screen (hidden while showing the 3D model).
           Lives in the normal 2D DOM so touch events work on every platform. */}
@@ -1115,7 +1275,7 @@ export default function AR() {
         />
       )}
 
-      {(status === 'loading' || status === 'starting') && (
+      {(status === 'loading' || status === 'preparing') && (
         <div className={styles.loadingOverlay}>
           <div className={styles.loadingInner}>
             <div className={styles.loadingLogo}>◈</div>
@@ -1136,7 +1296,7 @@ export default function AR() {
             <div className={styles.errorIcon}>⚠</div>
             <h2 className={styles.errorTitle}>Something went wrong</h2>
             <p className={styles.errorMsg}>{errorMsg}</p>
-            <button className={styles.retryBtn} onClick={() => window.location.reload()}>Try again</button>
+            <button className={styles.retryBtn} onClick={handleRetry}>Try again</button>
           </div>
         </div>
       )}

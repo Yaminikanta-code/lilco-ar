@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'
 
 const html = readFileSync('dist/index.html', 'utf8')
@@ -17,16 +17,13 @@ if (gzipBytes > maxEntryGzipBytes) {
   throw new Error(`Initial JS is ${(gzipBytes / 1024).toFixed(1)} KiB gzip; budget is 80 KiB`)
 }
 
-const requiredOfflineAssets = ['dist/demo-experience.json', 'dist/demo-experience.mind']
-for (const assetPath of requiredOfflineAssets) {
-  if (!statSync(assetPath).size) throw new Error(`Required offline scanner asset is missing: ${assetPath}`)
-}
-
-const config = JSON.parse(readFileSync('public/demo-experience.json', 'utf8'))
-for (const experience of config) {
-  if (existsSync(`dist${experience.targetImageUrl}`)) {
-    throw new Error(`Compiled target source leaked into the production package: ${experience.targetImageUrl}`)
-  }
+// The experience config must ship; the target images themselves are compiled
+// into a .mind file per-card at runtime only after the classify-card LLM
+// step identifies which one is in view (see src/pages/AR.jsx), so unlike the
+// old multi-target build there's no single precompiled .mind to check for,
+// and the source images are expected to be present in dist/, not excluded.
+if (!statSync('dist/demo-experience.json').size) {
+  throw new Error('Required offline scanner asset is missing: dist/demo-experience.json')
 }
 
 console.log(`Build budgets passed: initial JS ${(gzipBytes / 1024).toFixed(1)} KiB gzip`)
