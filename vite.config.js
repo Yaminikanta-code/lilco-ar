@@ -30,9 +30,10 @@ export default defineConfig({
   },
   server: {
     historyApiFallback: true,
-    // Forwards /api/* to the local Hono server (`npm run server`) so the
+    // Forwards /api/* to the local Hono server (`bun run server`) so the
     // client can always call a plain relative /api/classify-card, in dev
-    // and in production (Netlify redirect) alike.
+    // and in production (Netlify redirect, or the Fly.io single-process
+    // server) alike.
     proxy: {
       '/api': process.env.API_PROXY_TARGET || 'http://localhost:8787'
     }

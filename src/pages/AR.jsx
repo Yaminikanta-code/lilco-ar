@@ -739,18 +739,16 @@ export default function AR() {
     }
   }, [allExperiences])
 
-  // Retry from an error: if the experience list never loaded, a full reload
-  // is simplest; otherwise just go back to the scanning phase.
-  const handleRetry = useCallback(() => {
-    if (!allExperiences) {
-      window.location.reload()
-      return
-    }
-    setChosenExperience(null)
-    setConfig(null)
-    setErrorMsg('')
-    setStatus('scanning')
-  }, [allExperiences])
+// A full reload, not an in-place React state reset: mind-ar's viewer module
+  // isn't built to be cleanly stopped and restarted within one page session —
+  // `window.MINDAR.IMAGE.MindARThree` breaks after the first stop+restart
+  // cycle (internal WASM/worker teardown that wasn't designed for reuse), so
+  // every scan after an in-place reset failed identically. A fresh page load
+  // is the only state we know is reliable, since that's what the very first
+  // scan always goes through.
+  const resetToScanning = useCallback(() => {
+    window.location.reload()
+  }, [])
 
   // Effect 3: once a card is identified, compile (or reuse a cached) .mind
   // for JUST that one target — reusing the same compiler/cache helpers the
@@ -761,7 +759,16 @@ export default function AR() {
 
     const prepareTarget = async () => {
       try {
-        preloadMindARViewer()
+        // Deliberately NOT preloaded here (even speculatively/unawaited).
+        // mind-ar's compiler bundle (mindar-image.prod.js, loaded below on a
+        // cache miss) does `window.MINDAR.IMAGE = i` — an unconditional
+        // replace, not a merge — while the viewer bundle (mindar-image-
+        // three.prod.js) merges safely. Starting the viewer load early races
+        // the two: if the compiler bundle finishes after the viewer has set
+        // MindARThree, it silently wipes it out. Loading the viewer only
+        // after any needed compile step has fully finished (see Effect 4,
+        // which awaits preloadMindARViewer() itself) guarantees the
+        // destructive compiler load always settles first.
         setStatus('preparing')
         setLoadingText('Preparing AR target...')
         setCompileProgress(0)
@@ -1296,7 +1303,7 @@ export default function AR() {
             <div className={styles.errorIcon}>⚠</div>
             <h2 className={styles.errorTitle}>Something went wrong</h2>
             <p className={styles.errorMsg}>{errorMsg}</p>
-            <button className={styles.retryBtn} onClick={handleRetry}>Try again</button>
+            <button className={styles.retryBtn} onClick={resetToScanning}>Try again</button>
           </div>
         </div>
       )}
@@ -1304,9 +1311,14 @@ export default function AR() {
       {status === 'ready' && (
         <header className={styles.topBar}>
           <span className={styles.topLogo}>STEM AR</span>
-          <div className={`${styles.trackBadge} ${tracked ? styles.trackBadgeActive : ''}`}>
-            <span className={styles.trackDot} />
-            <span>{tracked ? 'Target Locked' : 'Searching Target'}</span>
+          <div className={styles.topBarRight}>
+            <div className={`${styles.trackBadge} ${tracked ? styles.trackBadgeActive : ''}`}>
+              <span className={styles.trackDot} />
+              <span>{tracked ? 'Target Locked' : 'Searching Target'}</span>
+            </div>
+            <button type="button" className={styles.rescanBtn} onClick={resetToScanning}>
+              Scan again
+            </button>
           </div>
         </header>
       )}

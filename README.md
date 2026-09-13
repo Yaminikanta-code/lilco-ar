@@ -61,7 +61,7 @@ This application adopts the official **LilCo Signature Orange and Crisp White/Da
 ## 💻 Local Development
 
 ### Prerequisites
-- Node.js 18+ and `npm`
+- [Bun](https://bun.sh) 1.x
 - Modern web browser with WebRTC / Camera permissions (`localhost` or HTTPS required)
 
 ### Steps
@@ -70,26 +70,26 @@ This application adopts the official **LilCo Signature Orange and Crisp White/Da
    ```bash
    git clone <repository-url>
    cd lilco-ar
-   npm install
+   bun install
    ```
 
-2. **Run Development Server**:
+2. **Run Development Server** (frontend + classify-card backend together):
    ```bash
-   npm run dev
+   bun run dev:all
    ```
 
 3. **Build for Production**:
    ```bash
-   npm run build
-   npm run preview
+   bun run build
+   bun run preview
    ```
 
 ### Testing on a Real Device (Cloudflare Tunnel)
 
 Camera access for the AR scanner requires HTTPS or `localhost`, so a phone on the same network can't just hit `http://<lan-ip>:5173`. Use a Cloudflare Tunnel to get a temporary public HTTPS URL for the dev server:
 
-1. Start the dev server: `npm run dev`
-2. In a second terminal, start the tunnel: `npm run tunnel`
+1. Start the dev server: `bun run dev:all`
+2. In a second terminal, start the tunnel: `bun run tunnel`
 3. Open the printed `https://*.trycloudflare.com` URL on your phone.
 
 This requires `cloudflared` installed globally (`cloudflared --version` to check). No Cloudflare account is needed for this quick/ephemeral tunnel.
@@ -100,27 +100,27 @@ This requires `cloudflared` installed globally (`cloudflared --version` to check
 
 1. **Build Web Assets**:
    ```bash
-   npm run build
+   bun run build
    ```
 
 2. **Sync with Capacitor**:
    ```bash
-   npx cap copy
-   npx cap sync
+   bunx cap copy
+   bunx cap sync
    ```
 
 3. **Open Android Studio / Run**:
    ```bash
-   npx cap open android
+   bunx cap open android
    # OR
-   npx cap run android
+   bunx cap run android
    ```
 
 ## AR initialization contract
 
 The default scanner uses `public/demo-experience.mind`, precompiled with MindAR 1.1.5 from the ordered postcard images at a maximum dimension of 1024 pixels. This keeps target compilation off the startup path without changing detector inputs or settings.
 
-- Run `npm run build:check` before release. It rejects stale or reordered target inputs, a mismatched `.mind` artifact, missing offline scanner assets, and an initial JavaScript bundle above 80 KiB gzip.
+- Run `bun run build:check` before release. It enforces an initial JavaScript bundle above 80 KiB gzip and that the experience config ships in the build output.
 - When a postcard image or its order changes, regenerate the `.mind` file with MindAR 1.1.5 and update `scripts/demo-target-manifest.json` plus `targetSetVersion` together.
 - Source postcard PNGs remain in `public` for local development and regeneration, but the production build excludes them because the scanner consumes the compiled target artifact.
 - The build also excludes the currently unreferenced `photoelectric2.glb` and `Schrodinger's Cat.png`; they remain in the repository until their ownership is resolved.
