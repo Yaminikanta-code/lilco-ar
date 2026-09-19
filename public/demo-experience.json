@@ -122,9 +122,6 @@
   {
     "targetImageUrl": "/Schrodinger's Cat.png",
     "youtubeUrl": "https://youtube.com/shorts/nXWW2XpZWMM",
-    "glbModelUrl": "/schrondiger_cat.glb",
-    "modelPosition": { "x": 0, "y": 0, "z": 0 },
-    "modelRotation": { "x": 0, "y": 0, "z": 0 },
     "modelScale": 50,
     "cardTitle": "Schrodinger's Cat",
     "cardBody": "This AR experience is loaded from backend-style JSON.",
@@ -134,9 +131,6 @@
   {
     "targetImageUrl": "/Grime Dice.png",
     "youtubeUrl": "https://youtu.be/u4XNL-uo520?si=xWhn1u9-_6W__28S",
-    "glbModelUrl": "/grime_dice.glb",
-    "modelPosition": { "x": 0, "y": 0, "z": 0 },
-    "modelRotation": { "x": 0, "y": 0, "z": 0 },
     "modelScale": 80,
     "cardTitle": "Grime Dice",
     "cardBody": "This AR experience is loaded from backend-style JSON.",
@@ -145,7 +139,7 @@
   },
   {
     "targetImageUrl": "/Conway's Game of Life.png",
-    "youtubeUrl": "https://www.youtube.com/watch?v=Hf729KBYN10",
+    "youtubeUrl": "",
     "glbModelUrl": "/Conway_life.glb",
     "modelPosition": { "x": 0, "y": 0, "z": 0 },
     "modelRotation": { "x": 0, "y": 0, "z": 0 },
